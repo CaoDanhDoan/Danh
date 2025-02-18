@@ -1,0 +1,197 @@
+
+#include <SoftwareSerial.h>
+//NodeMCU--------------------------
+#include <ESP8266WiFi.h>
+#include <ESP8266HTTPClient.h>
+SoftwareSerial RFID(D6, D5); // D6 - TX , D5 - RX 
+const char *ssid = "Hí lô";
+const char *password = "12345678d";
+const char* device_token  = "8ceb36c810343326";
+
+String URL = "http://192.168.43.202:80//rfidattendance/getdata.php"; 
+String getData, Link;
+String OldCardID = "";
+String CardID ="";
+unsigned long previousMillis = 0;//du?c s? d?ng d? ki?m tra th?i gian gi?a các l?n g?i mã th? RFID.
+
+int flag=0,RX_Flag=0;//Bi?n c? d? ki?m tra tr?ng thái d?c th? RFID.
+char Code[14];
+long Num=0; 
+int BUZZ = D1;
+int LED1 = D3;
+int LED2 = D7;
+int i;
+long temp=0, last=0;
+
+void setup() {
+  Serial.begin(115200);//Kh?i t?o giao ti?p n?i ti?p v?i t?c d? baud 115200 thông qua c?ng Serial.
+  delay(100);
+  RFID.begin(9600);//kh?i t?o giao ti?p n?i ti?p v?i module d?c th? RFID v?i t?c d? baud 9600.
+  pinMode(BUZZ, OUTPUT); 
+  pinMode(LED1, OUTPUT); 
+  pinMode(LED2, OUTPUT);
+  connectToWiFi();
+}
+
+void loop() {
+  
+  if(!WiFi.isConnected()){
+    connectToWiFi();   
+  }
+  //---------------------------------------------
+  if (millis() - previousMillis >= 15000) {
+    previousMillis = millis();
+    OldCardID="";// so sánh th?i gian. N?u qua 15 giây, bi?n OldCardID du?c d?t l?i thành chu?i r?ng.
+  }
+  delay(50);
+  
+  
+  ChuongTrinhDocThe();
+  if(Num) {
+    CardID = String(Num);
+    Num=0;
+    //---------------------------------------------
+    if( CardID == OldCardID ){
+      return;
+      //N?u hai giá tr? này b?ng nhau, t?c là dã d?c l?i cùng m?t th? RFID, chuong trình s? thoát kh?i hàm và không th?c hi?n thêm b?t k? x? lý nào
+    }
+    else{
+      OldCardID = CardID;
+    }
+    //n?u hai giá tr? khác nhau, t?c là dã d?c m?t th? RFID m?i, giá tr? c?a CardID du?c gán cho OldCardID d? theo dõi th? RFID m?i nh?t.
+    
+    SendCardID(CardID);
+    delay(1000);
+  }
+}
+  void ChuongTrinhDocThe()
+  {
+      Read_ID();
+      if(RX_Flag==1)
+      {
+        digitalWrite(BUZZ, HIGH); 
+        delay(200);
+        digitalWrite(BUZZ, LOW);
+        for(i=5;i<11;i++)//
+        {
+          Num<<=4;
+          if(Code[i]>64)  Num+=((Code[i])-55);
+          else Num+=((Code[i])-48);  //chuy?n d?i d? li?u d?c du?c t? th?
+        
+        } 
+        Serial.println(Num);
+      
+        while(RFID.read()>0);//d?n d?p và chu?n b? cho vi?c d?c ti?p theo
+        RX_Flag=0;//
+        //Num=0; 
+      }
+  }
+void Read_ID(void)//d?c d? li?u t? th? RFID qua vi?c s? d?ng vòng l?p d? d?c và luu tr? d? li?u vào bi?n t?m th?i
+{
+    int i=0;
+    char temp;
+    for(i=0;(RFID.available()>0);i++)//Vòng l?p này s? ti?p t?c cho d?n khi không còn d? li?u nào kh? d?ng t? th? RFID d? d?c.
+    
+    {
+      temp=RFID.read();
+     
+      delay(2);
+      
+      if(temp==0X02)  
+        {
+         flag=1;i=0;RX_Flag=0;//
+        }
+      if(flag==1)
+      {
+        if(temp==0X03)
+        {
+         flag=0;  
+         if(i==13) RX_Flag=1;//
+         else RX_Flag=0;
+         break;
+        }
+        Code[i]=temp;
+      } 
+    }       
+     flag=0;//
+}
+
+void SendCardID(String Card_uid) {
+  Serial.println("Sending the Card ID");
+  if (WiFi.isConnected()) {
+    WiFiClient client;
+    HTTPClient http;    
+
+    
+    getData = "?card_uid=" + String(Card_uid) + "&device_token=" + String(device_token); //Xây d?ng thông tin c?n g?i lên server trong d?nh d?ng chu?i.
+   
+    Link = URL + getData;
+    http.begin(client, Link); 
+
+    int httpCode = http.GET();  
+
+    if (httpCode > 0) {
+      String payload = http.getString(); // L?y n?i dung ph?n h?i t? server và luu vào bi?n payload   
+
+      Serial.println(httpCode);    
+      Serial.println(Card_uid);     
+      Serial.println(payload);   
+
+      if (httpCode == HTTP_CODE_OK) {
+        if (payload.substring(0, 5) == "login") {
+          String user_name = payload.substring(5);
+         
+        } else if (payload.substring(0, 6) == "logout") {
+          String user_name = payload.substring(6);
+          
+        } else if (payload == "succesful") {
+         
+        } else if (payload == "available") {
+         
+        }
+      } else {
+        String error = http.errorToString(httpCode);
+        Serial.println("HTTP error: " + error);
+      }
+    } else {
+      Serial.println("Connection failed");
+    }
+
+    http.end();  
+  }
+}
+
+void connectToWiFi(){
+    WiFi.mode(WIFI_OFF);        
+    delay(5000);
+    WiFi.mode(WIFI_STA);//Ð?t thi?t b? vào ch? d? Station d? có th? k?t n?i v?i m?t m?ng WiFi thông qua SSID và password.
+    Serial.print("Ðang k?t n?i v?i ");
+    Serial.println(ssid);
+    WiFi.begin(ssid, password);
+    
+    unsigned long connectionTimeout = millis();//du?c s? d?ng d? ghi l?i th?i di?m b?t d?u c?a quá trình k?t n?i WiFi trong hàm 
+
+    while (WiFi.status() != WL_CONNECTED) {
+      delay(500);
+      Serial.print(".");
+     
+      if (millis() - connectionTimeout > 15000) {//N?u th?i gian k?t n?i vu?t quá 15 giây, thoát kh?i vòng l?p.
+        Serial.println("H?t th?i gian k?t n?i");
+        break;
+      }
+    }
+    
+    if (WiFi.status() == WL_CONNECTED) {
+      Serial.println("");
+      Serial.println("Ðã k?t n?i");
+      Serial.print("Ð?a ch? IP: ");
+      Serial.println(WiFi.localIP());  
+    } else {
+      Serial.println("");
+      Serial.println("K?t n?i th?t b?i");
+    }
+    
+    delay(1000);
+}
+
+//=======================================================================

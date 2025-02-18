@@ -1,0 +1,179 @@
+#include <SoftwareSerial.h>
+#include <ESP8266WiFi.h>
+#include <ESP8266HTTPClient.h>
+
+SoftwareSerial RFID(D6, D5); // D6 - TX (RFID), D5 - RX (RFID)
+
+const char *ssid = "DLxrd223";
+const char *password = "hoithangkiadi";
+const char *device_token = "8ceb36c810343326";
+
+String serverName = "http://laptrinhnhung.atwebpages.com/"; // Thay th? b?ng tên mi?n c?a máy ch? web
+String path = "/rfidattendance/getdata.php"; // Ðu?ng d?n d?n trang x? lý trên máy ch?
+String URL = "http://" + serverName + path; // T?o URL m?i t? tên mi?n và du?ng d?n
+
+String getData, Link;
+String OldCardID = "";
+String CardID = "";
+unsigned long previousMillis = 0;
+
+int flag = 0, RX_Flag = 0;
+char Code[14];
+long Num = 0;
+int BUZZ = D1;
+int LED1 = D3;
+int LED2 = D7;
+int redLed = D0;
+int blueLed = D4;
+int i;
+long temp = 0, last = 0;
+
+void setup() {
+  Serial.begin(115200);
+  delay(100);
+  RFID.begin(9600);
+  pinMode(BUZZ, OUTPUT);
+  pinMode(LED1, OUTPUT);
+  pinMode(LED2, OUTPUT);
+  pinMode(blueLed, OUTPUT);
+  pinMode(redLed, OUTPUT);
+  connectToWiFi();
+}
+
+void loop() {
+  if (!WiFi.isConnected()) {
+    connectToWiFi();
+  }
+
+  if (millis() - previousMillis >= 15000) {
+    previousMillis = millis();
+    OldCardID = "";
+  }
+  delay(50);
+
+  ChuongTrinhDocThe();
+
+  if (Num) {
+    CardID = String(Num);
+    Num = 0;
+
+    if (CardID == OldCardID) {
+      return;
+    } else {
+      OldCardID = CardID;
+    }
+
+    SendCardID(CardID);
+    delay(1000);
+  }
+}
+
+void ChuongTrinhDocThe() {
+  Read_ID();
+  if (RX_Flag == 1) {
+    digitalWrite(BUZZ, HIGH);
+    delay(200);
+    digitalWrite(BUZZ, LOW);
+    for (i = 5; i < 11; i++) {
+      Num <<= 4;
+      if (Code[i] > 64)  Num += ((Code[i]) - 55);
+      else Num += ((Code[i]) - 48);
+    }
+    Serial.println(Num);
+    while (RFID.read() > 0);
+    RX_Flag = 0;
+  }
+}
+
+void Read_ID(void) {
+  int i = 0;
+  char temp;
+  for (i = 0; (RFID.available() > 0); i++) {
+    temp = RFID.read();
+    delay(2);
+    if (temp == 0X02) {
+      flag = 1; i = 0; RX_Flag = 0;
+    }
+    if (flag == 1) {
+      if (temp == 0X03) {
+        flag = 0;
+        if (i == 13) RX_Flag = 1;
+        else RX_Flag = 0;
+        break;
+      }
+      Code[i] = temp;
+    }
+  }
+  flag = 0;
+}
+
+void SendCardID(String Card_uid) {
+  if (WiFi.isConnected()) {
+    WiFiClient client;
+    HTTPClient http;
+
+    getData = "?card_uid=" + String(Card_uid) + "&device_token=" + String(device_token);
+    Link = URL + getData;
+    http.begin(client, Link);
+
+    int httpCode = http.GET();
+
+    if (httpCode > 0) {
+      String payload = http.getString();
+      Serial.println(httpCode);
+      Serial.println(Card_uid);
+      Serial.println(payload);
+
+      if (httpCode == HTTP_CODE_OK) {
+        if (payload.substring(0, 5) == "login") {
+          String user_name = payload.substring(5);
+        } else if (payload.substring(0, 6) == "logout") {
+          String user_name = payload.substring(6);
+        } else if (payload == "succesful") {
+          // X? lý ph?n h?i thành công
+        } else if (payload == "available") {
+          // X? lý ph?n h?i có s?n
+        }
+      } else {
+        String error = http.errorToString(httpCode);
+        Serial.println("L?i HTTP: " + error);
+      }
+    } else {
+      Serial.println("K?t n?i th?t b?i");
+    }
+
+    http.end();
+  }
+}
+
+void connectToWiFi() {
+  WiFi.mode(WIFI_OFF);
+  delay(5000);
+  WiFi.mode(WIFI_STA);
+  Serial.print("Ðang k?t n?i v?i ");
+  Serial.println(ssid);
+  WiFi.begin(ssid, password);
+
+  unsigned long connectionTimeout = millis();
+
+  while (WiFi.status() != WL_CONNECTED) {
+    delay(500);
+    Serial.print(".");
+    if (millis() - connectionTimeout > 15000) {
+      Serial.println("H?t th?i gian k?t n?i");
+      break;
+    }
+  }
+
+  if (WiFi.status() == WL_CONNECTED) {
+    Serial.println("");
+    Serial.println("Ðã k?t n?i");
+    Serial.print("Ð?a ch? IP: ");
+    Serial.println(WiFi.localIP());
+  } else {
+    Serial.println("");
+    Serial.println("K?t n?i th?t b?i");
+  }
+
+  delay(1000);
+}
